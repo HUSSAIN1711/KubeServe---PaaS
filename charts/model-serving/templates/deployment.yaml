@@ -1,0 +1,81 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "model-serving.fullname" . }}
+  namespace: {{ .Values.namespace | default .Release.Namespace }}
+  labels:
+    {{- include "model-serving.labels" . | nindent 4 }}
+    app.kubernetes.io/component: inference-server
+  {{- with .Values.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  replicas: {{ .Values.deployment.replicas }}
+  selector:
+    matchLabels:
+      {{- include "model-serving.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "model-serving.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.serviceAccount }}
+      {{- if .create }}
+      serviceAccountName: {{ .name | default (include "model-serving.fullname" .) }}
+      {{- end }}
+      {{- end }}
+      initContainers:
+      - name: download-model
+        image: minio/mc:latest
+        command:
+        - /bin/sh
+        - -c
+        - |
+          echo "Configuring Minio client..."
+          {{- if .Values.model.s3UseSSL }}
+          PROTOCOL="https"
+          {{- else }}
+          PROTOCOL="http"
+          {{- end }}
+          mc alias set s3 ${PROTOCOL}://{{ .Values.model.s3Endpoint }} {{ .Values.model.s3AccessKey }} {{ .Values.model.s3SecretKey }}
+          echo "Downloading model from {{ .Values.model.s3Path }}..."
+          # Extract bucket and object path from s3://bucket/path format
+          S3_PATH="{{ .Values.model.s3Path }}"
+          BUCKET=$(echo $S3_PATH | sed 's|s3://||' | cut -d'/' -f1)
+          OBJECT_PATH=$(echo $S3_PATH | sed 's|s3://[^/]*/||')
+          echo "Bucket: $BUCKET, Object: $OBJECT_PATH"
+          mc cp s3/$BUCKET/$OBJECT_PATH /model/model.joblib
+          # Download requirements.txt if it exists
+          REQUIREMENTS_PATH=$(echo $OBJECT_PATH | sed 's|model.joblib|requirements.txt|')
+          mc cp s3/$BUCKET/$REQUIREMENTS_PATH /model/requirements.txt || echo "requirements.txt not found, using base image packages only"
+          echo "Model download complete"
+          ls -lh /model/
+        volumeMounts:
+        - name: model-storage
+          mountPath: /model
+      containers:
+      - name: inference-server
+        image: "{{ .Values.deployment.image.repository }}:{{ .Values.deployment.image.tag }}"
+        imagePullPolicy: {{ .Values.deployment.image.pullPolicy }}
+        ports:
+        - name: http
+          containerPort: 80
+          protocol: TCP
+        env:
+        - name: MODEL_PATH
+          value: "/model/model.joblib"
+        resources:
+          {{- toYaml .Values.deployment.resources | nindent 10 }}
+        volumeMounts:
+        - name: model-storage
+          mountPath: /model
+          readOnly: true
+        livenessProbe:
+          {{- toYaml .Values.deployment.livenessProbe | nindent 10 }}
+        readinessProbe:
+          {{- toYaml .Values.deployment.readinessProbe | nindent 10 }}
+      volumes:
+      - name: model-storage
+        emptyDir: {}
+

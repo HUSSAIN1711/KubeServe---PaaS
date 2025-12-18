@@ -145,6 +145,23 @@ async def test_model_version(test_session: AsyncSession, test_model: Model):
 
 
 @pytest.fixture
+async def test_model_version_ready(test_session: AsyncSession, test_model: Model):
+    """Create a test model version with READY status and S3 path."""
+    from app.models.model import ModelVersionStatus
+    
+    version = ModelVersion(
+        model_id=test_model.id,
+        version_tag="v1",
+        s3_path="s3://kubeserve-models/user-1/model/v1/model.joblib",
+        status=ModelVersionStatus.READY,
+    )
+    test_session.add(version)
+    await test_session.commit()
+    await test_session.refresh(version)
+    return version
+
+
+@pytest.fixture
 async def test_deployment(test_session: AsyncSession, test_model_version: ModelVersion):
     """Create a test deployment."""
     deployment = Deployment(

@@ -6,7 +6,17 @@
 - **Phase 1.2**: ✅ Complete - Authentication (JWT implementation)
 - **Phase 1.3**: ✅ Complete - Model Registry (Database Schema)
 - **Phase 1.4**: ✅ Complete - Artifact Storage (Minio/S3 integration)
-- **Next**: Phase 2 - The Optimized Inference Engine
+- **Phase 2.1**: ✅ Complete - The "Heavy" Base Image
+- **Phase 2.2**: ✅ Complete - The Runtime Logic
+- **Phase 3.1**: ✅ Complete - Namespace Isolation
+- **Phase 3.2**: ✅ Complete - Helm Chart Factory
+- **Phase 3.3**: ✅ Complete - The Deploy Endpoint
+- **Phase 4.1**: ✅ Complete - Networking & Ingress
+- **Phase 5.1**: ✅ Complete - Observability (Metrics)
+- **Phase 5.2**: ✅ Complete - Visualization (Grafana Dashboards)
+- **Phase 6**: ✅ Complete - Reliability & Testing
+- **Phase 7**: ✅ Complete - Frontend Dashboard
+- **Next**: Project Complete - All phases implemented!
 
 ## Architectural Decisions
 - **Backend**: FastAPI with async SQLAlchemy
@@ -68,4 +78,102 @@
   - File validation: model files (.joblib, .pkl, .pickle) max 500MB, requirements.txt max 1MB
   - Model version s3_path updated after successful upload
   - Service method added to update version S3 path (`update_version_s3_path`)
+- Phase 2 completed:
+  - Inference server directory structure created (`inference-server/`)
+  - Dockerfile for kubeserve-base image with pre-installed common dependencies
+  - Base requirements file with fastapi, uvicorn, pandas, numpy, scikit-learn, joblib, prometheus-fastapi-instrumentator
+  - Smart start.sh entrypoint script that only installs missing packages (reduces cold start from 45s to 3s)
+  - FastAPI inference app (main.py) that loads model.joblib dynamically
+  - Prometheus metrics integration via prometheus-fastapi-instrumentator
+  - Container runs as non-root user (appuser) for security
+  - Health check endpoint and proper error handling
+- Phase 3.1 completed:
+  - Kubernetes client service created (`app/core/kubernetes_client.py`) for namespace operations
+  - Namespace creation integrated into user registration flow
+  - ResourceQuota creation: limits users to Max 2 CPU, 4GB RAM, 5 Pods
+  - NetworkPolicy creation: denies all egress by default, allows DNS, Minio (port 9000), and HTTPS (port 443 for PyPI)
+  - User service updated to automatically create isolated namespace on registration
+  - Graceful error handling: user creation succeeds even if Kubernetes is unavailable (logs warning)
+- Phase 3.2 completed:
+  - Helm chart created (`charts/model-serving/`) for generic model deployments
+  - Deployment template with init container using `minio/mc` to download model from S3
+  - Service template (ClusterIP) to expose inference endpoints
+  - HorizontalPodAutoscaler template with CPU and memory-based scaling (min 1, max 5 replicas)
+  - Liveness and readiness probes configured to check `/health` endpoint
+  - Configurable values.yaml with model S3 path, resource limits, and autoscaling settings
+  - Helper templates for consistent labeling and naming
+  - Comprehensive README with installation and configuration examples
+- Testing for Phase 3.1 and 3.2 completed:
+  - Unit tests for Kubernetes client (`tests/test_kubernetes.py`) - 13 tests covering namespace operations, ResourceQuota, NetworkPolicy, and user service integration
+  - Helm chart validation tests (`tests/test_helm_chart.py`) - 15 tests covering chart structure, values validation, and template rendering
+  - Tests use mocking to avoid requiring actual Kubernetes cluster
+  - Helm chart tests validate YAML structure and template correctness
+- Phase 3.3 completed:
+  - Helm deployment service created (`app/services/deployment_service.py`) for managing Helm install/uninstall operations
+  - DeploymentService extended to deploy models to Kubernetes using Helm
+  - Deployment endpoint now triggers actual Kubernetes deployments (not just database records)
+  - S3 path parsing and injection into Helm values
+  - Automatic Ingress creation with deployment-specific paths (`/api/v1/predict/{deployment_id}`)
+  - Deployment URL generation and storage
+  - Helm uninstall on deployment deletion
+  - Error handling: database cleanup on Helm deployment failure
+- Phase 4.1 completed:
+  - NGINX Ingress Controller installation script created (`scripts/install-ingress-controller.sh`)
+  - Ingress template added to Helm chart (`charts/model-serving/templates/ingress.yaml`)
+  - KubernetesClient extended with `create_ingress()` and `delete_ingress()` methods
+  - Ingress configuration added to Helm chart values.yaml
+  - Configuration settings added for `INGRESS_HOST` and `INGRESS_BASE_PATH`
+  - Documentation created (`phase4-ingress.md`) with usage instructions
+- Testing for Phase 3.3 and 4.1 completed:
+  - Unit tests for deployment service (`tests/test_deployment_service.py`) - 11 tests covering HelmDeploymentService operations, DeploymentService integration, error handling, and S3 path parsing
+  - Unit tests for Ingress operations (`tests/test_ingress.py`) - 7 tests covering Ingress creation, deletion, path configuration, annotations, and ingress class
+  - Tests use mocking to avoid requiring actual Kubernetes cluster or Helm
+  - Added `test_model_version_ready` fixture for deployment tests
+  - Updated pytest markers for `deployment` and `ingress` test categories
+- Phase 5.1 completed:
+  - Prometheus installation script created (`scripts/install-prometheus.sh`) for kube-prometheus-stack
+  - ServiceMonitor template added to Helm chart (`charts/model-serving/templates/servicemonitor.yaml`)
+  - Custom prediction latency metrics added to inference server (`prediction_latency_ms` histogram, `predictions_total` counter)
+  - `prometheus-client` library added to inference server requirements
+  - ServiceMonitor automatically enabled in deployment service
+  - Monitoring configuration added to Helm chart values.yaml
+  - Documentation created (`phase5-observability.md`) with usage instructions and Prometheus query examples
+- Phase 5.2 completed:
+  - Master dashboard created (`grafana/dashboards/kubeserve-master.json`) with platform-wide metrics (CPU per user, request rate, error rates, latency, success rate)
+  - Deployment dashboard created (`grafana/dashboards/kubeserve-deployment.json`) with per-deployment metrics and variable selectors
+  - Dashboard import script created (`scripts/import-grafana-dashboards.sh`) for automated dashboard provisioning
+  - Grafana README created (`grafana/README.md`) with installation instructions, troubleshooting, and customization guide
+  - Both dashboards include comprehensive panels for monitoring, debugging, and capacity planning
+- Phase 5 unit tests completed:
+  - Metrics tests created (`tests/test_metrics.py`) covering inference server metrics configuration, ServiceMonitor template validation, and monitoring configuration
+  - Dashboard tests created (`tests/test_dashboards.py`) covering master and deployment dashboard JSON validation, structure, panels, and configuration
+  - Tests verify metrics are defined correctly, ServiceMonitor template structure, and dashboard JSON validity
+  - Updated pytest.ini with `metrics` marker
+  - Updated tests/README.md with Phase 5 test documentation
+- Phase 6 completed:
+  - Integration test script created (`scripts/integration_test.sh`) for end-to-end workflow testing (upload -> deploy -> predict -> delete)
+  - Locust load testing setup (`locustfile.py`) with single/batch prediction tasks and health checks
+  - Load test runner script (`scripts/run-load-test.sh`) for automated load testing
+  - Documentation created (`phase6-testing.md`) with test scenarios, HPA verification steps, and troubleshooting guide
+  - Test scenarios defined: baseline (single pod) and scalability (HPA enabled) tests
+  - Locust added to requirements.txt for load testing
+- Automation completed:
+  - One-command startup script created (`scripts/start-backend.sh`) that starts all infrastructure (Phases 0-5) automatically
+  - Shutdown script created (`scripts/stop-backend.sh`) for clean teardown
+  - Script handles prerequisites checking, Docker services, Kind cluster, image building, Helm installations, database migrations, and API server startup
+  - Quick start guide created (`QUICKSTART.md`) with usage instructions and troubleshooting
+  - Scripts README created (`scripts/README.md`) documenting all automation scripts
+- Phase 7 completed:
+  - Next.js 14 project setup with TypeScript, Tailwind CSS, and React Query
+  - Authentication pages (login/register) with JWT token storage in cookies
+  - Model Hub with real-time status polling (every 30 seconds) and status badges
+  - Model management (create, view, delete models and versions)
+  - Drag-and-drop file upload UI using react-dropzone
+  - Version management with status updates and deployment creation
+  - Deployment detail page with live URL display and Grafana dashboard embedding
+  - Dashboard layout with navigation and logout functionality
+  - API client with axios interceptors for automatic token injection
+  - React Query for server state management with automatic refetching
+  - Comprehensive documentation created (`phase7-frontend.md`)
+  - Frontend README with setup and usage instructions
 

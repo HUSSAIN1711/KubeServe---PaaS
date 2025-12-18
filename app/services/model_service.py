@@ -2,6 +2,7 @@
 Model service containing business logic for model operations.
 """
 
+import logging
 from typing import List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import HTTPException, status
@@ -18,8 +19,13 @@ from app.schemas.model import (
     ModelVersionResponse,
     DeploymentCreate,
     DeploymentResponse,
+    DeploymentUpdate,
 )
 from app.models.model import ModelVersionStatus
+from app.services.deployment_service import HelmDeploymentService
+from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 class ModelService:
@@ -307,6 +313,7 @@ class DeploymentService:
         self.repository = DeploymentRepository(db)
         self.version_repository = ModelVersionRepository(db)
         self.model_repository = ModelRepository(db)
+        self.helm_service = HelmDeploymentService()
 
     async def create_deployment(
         self, deployment_data: DeploymentCreate, user_id: int
@@ -347,8 +354,70 @@ class DeploymentService:
                 detail=f"Cannot deploy version with status '{version.status}'. Version must be READY.",
             )
 
-        # Create deployment (k8s_service_name will be generated in repository)
+        # Business rule: Version must have S3 path
+        if not version.s3_path:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Model version must have an S3 path. Please upload the model first.",
+            )
+
+        # Create deployment record in database first (to get deployment.id)
         deployment = await self.repository.create(deployment_data)
+
+        # Deploy to Kubernetes using Helm
+        namespace = f"user-{user_id}"
+        release_name = deployment.k8s_service_name  # Use the generated service name as release name
+        
+        try:
+            # Parse S3 path to extract bucket and key
+            # Format: s3://bucket/path/to/model.joblib or bucket/path/to/model.joblib
+            s3_path = version.s3_path
+            if s3_path.startswith("s3://"):
+                s3_path = s3_path[5:]  # Remove s3:// prefix
+            
+            # Split into bucket and key
+            parts = s3_path.split("/", 1)
+            s3_bucket = parts[0] if len(parts) > 0 else settings.MINIO_BUCKET_NAME
+            s3_key = parts[1] if len(parts) > 1 else ""
+            
+            # Full S3 path for Helm
+            full_s3_path = f"s3://{s3_bucket}/{s3_key}" if s3_key else f"s3://{s3_bucket}/"
+            
+            # Determine S3 endpoint (use internal service name for Kubernetes)
+            # For local dev, use minio:9000 (internal to cluster)
+            # For external, use settings.MINIO_ENDPOINT
+            s3_endpoint = "minio:9000"  # Internal cluster endpoint
+            
+            # Deploy using Helm with deployment_id in the ingress path
+            deployment_info = self.helm_service.deploy_model(
+                release_name=release_name,
+                namespace=namespace,
+                s3_path=full_s3_path,
+                s3_endpoint=s3_endpoint,
+                s3_access_key=settings.MINIO_ACCESS_KEY,
+                s3_secret_key=settings.MINIO_SECRET_KEY,
+                s3_bucket=s3_bucket,
+                s3_use_ssl=settings.MINIO_USE_SSL,
+                replicas=deployment_data.replicas,
+                ingress_enabled=True,
+                ingress_host=settings.INGRESS_HOST,
+                ingress_path=f"{settings.INGRESS_BASE_PATH}/{deployment.id}"  # Use deployment.id in path
+            )
+            
+            # Update deployment with URL (using deployment.id)
+            deployment.url = f"http://{settings.INGRESS_HOST}:30080{settings.INGRESS_BASE_PATH}/{deployment.id}"
+            deployment = await self.repository.update(deployment)
+            
+            logger.info(f"Successfully deployed model version {version.id} as deployment {deployment.id}")
+            
+        except Exception as e:
+            # If Helm deployment fails, delete the database record
+            await self.repository.delete(deployment)
+            logger.error(f"Failed to deploy model version {version.id}: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to deploy model to Kubernetes: {str(e)}"
+            )
 
         return DeploymentResponse.model_validate(deployment)
 
@@ -461,5 +530,21 @@ class DeploymentService:
                 detail="Access denied",
             )
 
+        # Undeploy from Kubernetes using Helm
+        namespace = f"user-{user_id}"
+        release_name = deployment.k8s_service_name
+        
+        try:
+            self.helm_service.undeploy_model(
+                release_name=release_name,
+                namespace=namespace
+            )
+            logger.info(f"Successfully undeployed model deployment {deployment.id}")
+        except Exception as e:
+            # Log error but continue with database deletion
+            # This allows cleanup even if Helm uninstall fails
+            logger.warning(f"Failed to undeploy Helm release {release_name}: {str(e)}. Continuing with database cleanup.")
+
+        # Delete deployment record from database
         await self.repository.delete(deployment)
 

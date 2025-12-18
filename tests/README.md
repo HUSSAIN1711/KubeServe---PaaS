@@ -6,9 +6,16 @@ This directory contains unit tests for the KubeServe platform.
 
 ```
 tests/
-├── conftest.py          # Shared pytest fixtures
-├── test_auth.py         # Authentication tests (Phase 1.2)
-└── test_models.py       # Model registry tests (Phase 1.3)
+├── conftest.py              # Shared pytest fixtures
+├── test_auth.py             # Authentication tests (Phase 1.2)
+├── test_models.py           # Model registry tests (Phase 1.3)
+├── test_storage.py          # Storage/upload tests (Phase 1.4)
+├── test_kubernetes.py       # Kubernetes operations tests (Phase 3.1)
+├── test_helm_chart.py       # Helm chart validation tests (Phase 3.2)
+├── test_deployment_service.py  # Deployment service tests (Phase 3.3)
+├── test_ingress.py          # Ingress tests (Phase 4.1)
+├── test_metrics.py          # Metrics tests (Phase 5.1)
+└── test_dashboards.py       # Dashboard tests (Phase 5.2)
 ```
 
 ## Running Tests
@@ -48,6 +55,24 @@ pytest -m auth
 
 # Run only model registry tests
 pytest -m models
+
+# Run only storage tests
+pytest -m storage
+
+# Run only Kubernetes tests
+pytest -m kubernetes
+
+# Run only Helm chart tests
+pytest -m helm
+
+# Run only deployment service tests
+pytest -m deployment
+
+# Run only ingress tests
+pytest -m ingress
+
+# Run only metrics/observability tests
+pytest -m metrics
 ```
 
 ### Run with Verbose Output
@@ -109,6 +134,146 @@ pytest --cov=app --cov-report=html
 - ✅ Get/delete non-existent deployment
 - ✅ Invalid model type
 - ✅ Invalid replica count
+
+### Storage Tests (Phase 1.4)
+
+**StorageClient Tests:**
+- ✅ Client initialization
+- ✅ Bucket creation if missing
+- ✅ Successful file upload
+- ✅ Upload failure handling
+- ✅ File existence check
+- ✅ File non-existence check
+
+**StorageService Tests:**
+- ✅ S3 path generation
+- ✅ Path sanitization (special characters)
+- ✅ File validation (valid model files)
+- ✅ File validation (invalid extensions)
+- ✅ File validation (missing filename)
+- ✅ Successful artifact upload
+- ✅ File size validation (too large)
+- ✅ S3 error handling
+
+**Upload Endpoint Tests:**
+- ✅ Successful upload
+- ✅ Unauthorized access
+- ✅ Invalid version ID
+- ✅ Other user's version (ownership check)
+- ✅ Invalid file type
+
+### Kubernetes Tests (Phase 3.1)
+
+**KubernetesClient Tests:**
+- ✅ Client initialization
+- ✅ Client initialization with custom kubeconfig
+- ✅ Namespace existence check
+- ✅ Namespace creation
+- ✅ Namespace creation when already exists
+- ✅ ResourceQuota creation
+- ✅ ResourceQuota creation when already exists
+- ✅ NetworkPolicy creation
+- ✅ Complete user namespace setup
+- ✅ Namespace deletion
+- ✅ Namespace deletion when not found
+
+**User Service Integration Tests:**
+- ✅ User registration creates namespace
+- ✅ User creation handles K8s failure gracefully
+
+### Helm Chart Tests (Phase 3.2)
+
+**Chart Structure Tests:**
+- ✅ Chart.yaml exists and is valid
+- ✅ values.yaml exists and is valid
+- ✅ Required templates exist
+- ✅ Deployment template structure
+- ✅ Service template structure
+- ✅ HPA template structure
+- ✅ Helpers template exists
+
+**Values Validation Tests:**
+- ✅ Default values are valid
+- ✅ Default resource limits
+- ✅ Default health probes
+
+**Template Validation Tests:**
+- ✅ Deployment template uses values
+- ✅ Service template uses values
+- ✅ HPA template uses values
+- ✅ Init container handles SSL
+- ✅ Helpers used in templates
+
+### Deployment Service Tests (Phase 3.3)
+
+**HelmDeploymentService Tests:**
+- ✅ Service initialization
+- ✅ Successful model deployment via Helm
+- ✅ Helm deployment failure handling
+- ✅ Successful model undeployment via Helm
+- ✅ Undeployment when release doesn't exist
+- ✅ Get deployment status
+- ✅ Get status for non-existent deployment
+- ✅ Deployment with custom ingress path
+
+**DeploymentService Integration Tests:**
+- ✅ Create deployment triggers Helm deploy
+- ✅ Helm deployment failure cleans up database record
+- ✅ Deployment requires S3 path
+- ✅ Delete deployment triggers Helm undeploy
+- ✅ Helm undeployment failure doesn't prevent database cleanup
+- ✅ S3 path parsing and injection
+
+### Ingress Tests (Phase 4.1)
+
+**KubernetesClient Ingress Tests:**
+- ✅ Successful Ingress creation
+- ✅ Ingress creation when already exists
+- ✅ Ingress creation with custom path
+- ✅ Ingress creation with annotations
+- ✅ Successful Ingress deletion
+- ✅ Ingress deletion when doesn't exist
+- ✅ Ingress creation with custom ingress class
+
+### Metrics Tests (Phase 5.1)
+
+**Inference Server Metrics Tests:**
+- ✅ Metrics defined in code (prediction_latency_histogram, prediction_counter)
+- ✅ Histogram configuration (buckets, name, description)
+- ✅ Counter configuration (labels, name, description)
+- ✅ Metrics used in predict endpoint
+- ✅ Metrics endpoint exposed via Instrumentator
+
+**ServiceMonitor Template Tests:**
+- ✅ ServiceMonitor template exists and has correct structure
+- ✅ Conditional rendering based on monitoring.serviceMonitor.enabled
+- ✅ Correct selector configuration
+- ✅ Endpoint configuration (/metrics, port, interval)
+- ✅ Uses Helm helper functions
+- ✅ Monitoring configuration in values.yaml
+
+### Dashboard Tests (Phase 5.2)
+
+**Master Dashboard Tests:**
+- ✅ Dashboard JSON file exists and is valid
+- ✅ Dashboard structure (title, panels, schema)
+- ✅ Required panels (Request Rate, Error Rate, CPU/Memory Usage, Latency, Success Rate)
+- ✅ Prometheus queries configured
+- ✅ Appropriate tags
+
+**Deployment Dashboard Tests:**
+- ✅ Dashboard JSON file exists and is valid
+- ✅ Dashboard structure with templating variables
+- ✅ Template variables (namespace, deployment)
+- ✅ Required panels (Request Rate, Latency, CPU/Memory, Replicas)
+- ✅ Variables used in queries
+- ✅ Appropriate tags
+
+**Dashboard Configuration Tests:**
+- ✅ Dashboard directory exists
+- ✅ Expected number of dashboard files
+- ✅ Valid schema versions
+- ✅ Refresh intervals configured
 
 ## Test Fixtures
 

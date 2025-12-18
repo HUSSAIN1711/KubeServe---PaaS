@@ -2,6 +2,7 @@
 User service containing business logic for user operations.
 """
 
+import logging
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import HTTPException, status
@@ -9,6 +10,8 @@ from fastapi import HTTPException, status
 from app.repositories.user_repository import UserRepository
 from app.schemas.user import UserCreate, UserResponse
 from app.core.security import verify_password, get_password_hash, create_access_token
+
+logger = logging.getLogger(__name__)
 
 
 class UserService:
@@ -26,6 +29,7 @@ class UserService:
     async def create_user(self, user_data: UserCreate) -> UserResponse:
         """
         Create a new user with business logic validation.
+        Also creates an isolated Kubernetes namespace for the user.
 
         Args:
             user_data: User creation data
@@ -49,6 +53,22 @@ class UserService:
 
         # Create user via repository
         user = await self.repository.create(user_data, password_hash)
+        
+        # Create isolated Kubernetes namespace for the user
+        # This is done after user creation so we have the user ID
+        try:
+            from app.core.kubernetes_client import KubernetesClient
+            k8s_client = KubernetesClient()
+            namespace = k8s_client.setup_user_namespace(user.id)
+            logger.info(f"Created Kubernetes namespace {namespace} for user {user.id}")
+        except Exception as e:
+            # Log error but don't fail user creation
+            # This allows the system to work even if Kubernetes is not available
+            logger.warning(
+                f"Failed to create Kubernetes namespace for user {user.id}: {str(e)}. "
+                "User was created but namespace setup failed. This may need manual intervention."
+            )
+        
         return UserResponse.model_validate(user)
 
     async def authenticate_user(self, email: str, password: str) -> Optional[UserResponse]:

@@ -5,6 +5,7 @@ Tests both happy path and sad path scenarios.
 
 import pytest
 from httpx import AsyncClient
+from unittest.mock import Mock, patch
 from app.models.user import User
 from app.models.model import Model, ModelVersion, Deployment
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -134,11 +135,29 @@ class TestModelRegistryHappyPath:
         data = response.json()
         assert data["status"] == "Ready"
 
+    @patch('app.services.model_service.HelmDeploymentService')
     async def test_create_deployment_success(
-        self, test_client: AsyncClient, auth_headers: dict, test_model_version: ModelVersion
+        self, mock_helm_class, test_client: AsyncClient, auth_headers: dict, test_model_version: ModelVersion, test_session: AsyncSession
     ):
         """Test successful deployment creation."""
-        # Ensure version is Ready
+        # Mock Helm deployment service
+        mock_helm_service = Mock()
+        mock_helm_class.return_value = mock_helm_service
+        mock_helm_service.deploy_model.return_value = {
+            "release_name": f"model-{test_model_version.model_id}-{test_model_version.id}-model-serving",
+            "namespace": "user-1",
+            "url": "http://localhost:30080/api/v1/predict/1"
+        }
+        
+        # Ensure version is Ready and has S3 path in database
+        from app.models.model import ModelVersionStatus
+        test_model_version.status = ModelVersionStatus.READY
+        test_model_version.s3_path = "s3://kubeserve-models/user-1/test-model/v1/model.joblib"
+        test_session.add(test_model_version)
+        await test_session.commit()
+        await test_session.refresh(test_model_version)
+        
+        # Ensure version is Ready via API
         await test_client.patch(
             f"/api/v1/versions/{test_model_version.id}/status?status=Ready",
             headers=auth_headers,
@@ -173,16 +192,23 @@ class TestModelRegistryHappyPath:
         assert isinstance(data, list)
         assert len(data) >= 1
 
+    @patch('app.services.model_service.HelmDeploymentService')
     async def test_delete_deployment(
-        self, test_client: AsyncClient, auth_headers: dict, test_deployment: Deployment
+        self, mock_helm_class, test_client: AsyncClient, auth_headers: dict, test_deployment: Deployment
     ):
         """Test deleting a deployment."""
+        # Mock Helm undeploy service
+        mock_helm_service = Mock()
+        mock_helm_class.return_value = mock_helm_service
+        
         response = await test_client.delete(
             f"/api/v1/deployments/{test_deployment.id}",
             headers=auth_headers,
         )
         
         assert response.status_code == 204
+        # Verify Helm undeploy was called
+        mock_helm_service.undeploy_model.assert_called_once()
 
 
 @pytest.mark.asyncio

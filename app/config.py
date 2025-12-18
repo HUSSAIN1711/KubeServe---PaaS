@@ -40,6 +40,8 @@ class Settings(BaseSettings):
 
     # Kubernetes
     KUBECONFIG: Optional[str] = None  # Path to kubeconfig file, None uses default
+    INGRESS_HOST: str = "localhost"  # Ingress hostname
+    INGRESS_BASE_PATH: str = "/api/v1/predict"  # Base path for prediction endpoints
 
     # CORS
     CORS_ORIGINS: list[str] = ["http://localhost:3000", "http://localhost:3001"]

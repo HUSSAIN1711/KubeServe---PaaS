@@ -59,3 +59,15 @@ htmlcov/
 *.cover
 .hypothesis/
 
+# Load testing results
+load_test_report.html
+load_test_results_*.csv
+
+# Frontend
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/build
+frontend/.env.local
+frontend/.env*.local
+

@@ -1,0 +1,108 @@
+# Default values for model-serving chart
+# This chart deploys a KubeServe inference server for a single model version
+
+# Model configuration
+model:
+  # S3 path to model file (e.g., s3://kubeserve-models/user-1/model/v1/model.joblib)
+  s3Path: ""
+  # S3 endpoint (e.g., minio:9000 or localhost:9000)
+  s3Endpoint: "localhost:9000"
+  # S3 access key
+  s3AccessKey: "minioadmin"
+  # S3 secret key
+  s3SecretKey: "minioadmin"
+  # S3 bucket name
+  s3Bucket: "kubeserve-models"
+  # Use SSL for S3
+  s3UseSSL: false
+
+# Deployment configuration
+deployment:
+  # Number of replicas
+  replicas: 1
+  # Image to use
+  image:
+    repository: localhost:5001/kubeserve-base
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  
+  # Resource requests and limits
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "256Mi"
+    limits:
+      cpu: "1"
+      memory: "1Gi"
+  
+  # Liveness probe configuration
+  livenessProbe:
+    httpGet:
+      path: /health
+      port: 80
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  
+  # Readiness probe configuration
+  readinessProbe:
+    httpGet:
+      path: /health
+      port: 80
+    initialDelaySeconds: 10
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+# Service configuration
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 80
+
+# Horizontal Pod Autoscaler configuration
+autoscaling:
+  enabled: true
+  minReplicas: 1
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 50
+  targetMemoryUtilizationPercentage: 80
+
+# Labels and annotations
+labels: {}
+annotations: {}
+
+# Service account (optional)
+serviceAccount:
+  create: false
+  name: ""
+
+# Ingress configuration
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations: {}
+    # kubernetes.io/ingress.class: nginx
+    # cert-manager.io/cluster-issuer: "letsencrypt-prod"
+  hosts:
+    - host: localhost
+      paths:
+        - path: /api/v1/predict
+          pathType: Prefix
+  # TLS configuration (optional)
+  tls: []
+    # - secretName: model-serving-tls
+    #   hosts:
+    #     - localhost
+
+# Monitoring configuration
+monitoring:
+  serviceMonitor:
+    enabled: true
+    interval: "30s"
+    scrapeTimeout: "10s"
+    labels: {}
+      # prometheus: kube-prometheus-stack-prometheus
+      # release: kube-prometheus-stack
+

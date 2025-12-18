@@ -116,56 +116,56 @@ Database (PostgreSQL)
 - ❌ **Never** put business logic in repositories
 - ✅ Routes → Services → Repositories → Database
 
-## 🚀 Getting Started
+## 🚀 Quick Start
+
+### One-Command Backend Startup
+
+Start all backend infrastructure (Phases 0-5) with a single command:
+
+```bash
+# Make scripts executable (first time only)
+chmod +x scripts/start-backend.sh scripts/stop-backend.sh
+
+# Start everything
+./scripts/start-backend.sh
+```
+
+**Note**: If you get a "permission denied" error, run `chmod +x scripts/start-backend.sh` first.
+
+This automatically:
+- ✅ Starts Docker services (Minio, PostgreSQL)
+- ✅ Sets up Kubernetes cluster (Kind)
+- ✅ Builds and pushes inference server image
+- ✅ Installs Ingress Controller
+- ✅ Installs Prometheus & Grafana
+- ✅ Runs database migrations
+- ✅ Starts the FastAPI API server
+
+**API will be available at**: http://localhost:8000
+- **API Docs**: http://localhost:8000/docs
+- **Minio Console**: http://localhost:9001 (minioadmin/minioadmin)
+- **Prometheus**: http://localhost:30090
+- **Grafana**: http://localhost:30091 (admin/admin)
+
+See [QUICKSTART.md](QUICKSTART.md) for detailed instructions and troubleshooting.
 
 ### Prerequisites
 
 - Python 3.10+
-- Docker & Docker Compose
+- Docker & Docker Compose (daemon running)
 - kubectl
 - helm
-- kind (or minikube)
+- kind
 
-### Phase 0: Infrastructure Setup
+### Manual Setup (Alternative)
 
-See [phase0-setup.md](phase0-setup.md) for detailed instructions.
+If you prefer step-by-step setup, see [phase0-setup.md](phase0-setup.md) for detailed instructions.
 
-Quick start:
-```bash
-# 1. Set up Kind cluster
-./scripts/setup-kind-cluster.sh
-
-# 2. Start services (Minio, PostgreSQL)
-docker-compose up -d
-
-# 3. Verify setup
-./scripts/verify-phase0.sh
-```
-
-### Phase 1: Control Plane Setup
+### Stopping Everything
 
 ```bash
-# 1. Create virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# 2. Install dependencies
-pip install -r requirements.txt
-
-# 3. Set up environment variables
-cp .env.example .env
-# Edit .env with your configuration
-
-# 4. Run database migrations
-alembic upgrade head
-
-# 5. Start the application
-uvicorn app.main:app --reload
+./scripts/stop-backend.sh
 ```
-
-The API will be available at `http://localhost:8000`
-- API docs: `http://localhost:8000/docs`
-- Health check: `http://localhost:8000/health`
 
 ## 📚 Development Guidelines
 

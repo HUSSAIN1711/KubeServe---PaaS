@@ -1,0 +1,13 @@
+apiVersion: v2
+name: model-serving
+description: A Helm chart for deploying KubeServe ML model inference servers
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+keywords:
+  - machine-learning
+  - inference
+  - kubeserve
+maintainers:
+  - name: KubeServe Team
+
