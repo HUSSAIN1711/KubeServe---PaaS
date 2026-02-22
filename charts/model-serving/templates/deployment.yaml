@@ -28,26 +28,39 @@ spec:
       initContainers:
       - name: download-model
         image: minio/mc:latest
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 256Mi
         command:
         - /bin/sh
         - -c
         - |
-          echo "Configuring Minio client..."
+          set -e
           {{- if .Values.model.s3UseSSL }}
           PROTOCOL="https"
           {{- else }}
           PROTOCOL="http"
           {{- end }}
-          mc alias set s3 ${PROTOCOL}://{{ .Values.model.s3Endpoint }} {{ .Values.model.s3AccessKey }} {{ .Values.model.s3SecretKey }}
-          echo "Downloading model from {{ .Values.model.s3Path }}..."
-          # Extract bucket and object path from s3://bucket/path format
           S3_PATH="{{ .Values.model.s3Path }}"
-          BUCKET=$(echo $S3_PATH | sed 's|s3://||' | cut -d'/' -f1)
-          OBJECT_PATH=$(echo $S3_PATH | sed 's|s3://[^/]*/||')
-          echo "Bucket: $BUCKET, Object: $OBJECT_PATH"
-          mc cp s3/$BUCKET/$OBJECT_PATH /model/model.joblib
-          # Download requirements.txt if it exists
-          REQUIREMENTS_PATH=$(echo $OBJECT_PATH | sed 's|model.joblib|requirements.txt|')
+          REST="${S3_PATH#s3://}"
+          BUCKET="${REST%%/*}"
+          OBJECT_PATH="${REST#*/}"
+          echo "Downloading model from {{ .Values.model.s3Path }} (bucket=$BUCKET, object=$OBJECT_PATH)"
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            if mc alias set s3 ${PROTOCOL}://{{ .Values.model.s3Endpoint }} {{ .Values.model.s3AccessKey }} {{ .Values.model.s3SecretKey }} && mc cp s3/$BUCKET/$OBJECT_PATH /model/model.joblib; then
+              echo "Model download complete (attempt $attempt)"
+              break
+            fi
+            if [ "$attempt" -eq 10 ]; then echo "Failed after 10 attempts"; exit 1; fi
+            echo "Attempt $attempt/10 failed, retrying in 10s..."
+            sleep 10
+          done
+          # Download requirements.txt if it exists (optional; do not fail if missing)
+          REQUIREMENTS_PATH="${OBJECT_PATH%model.joblib}requirements.txt"
           mc cp s3/$BUCKET/$REQUIREMENTS_PATH /model/requirements.txt || echo "requirements.txt not found, using base image packages only"
           echo "Model download complete"
           ls -lh /model/

@@ -230,3 +230,4 @@ class TestKubernetesClientIngress:
             ingress_body = call_args[1]['body']
             assert hasattr(ingress_body, 'spec')
 
+

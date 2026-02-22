@@ -266,3 +266,4 @@ kubectl top pods -n user-1
   - Deployment monitoring
   - Grafana dashboard embedding
 
+

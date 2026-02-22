@@ -7,8 +7,11 @@ metadata:
   labels:
     {{- include "model-serving.labels" . | nindent 4 }}
     app.kubernetes.io/component: ingress
-  {{- with .Values.ingress.annotations }}
   annotations:
+    # Strip path prefix so backend receives /health, /predict etc. instead of /api/v1/predict/<id>/...
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+  {{- with .Values.ingress.annotations }}
     {{- toYaml . | nindent 4 }}
   {{- end }}
 spec:
@@ -31,8 +34,9 @@ spec:
       http:
         paths:
           {{- range .paths }}
-          - path: {{ .path }}
-            pathType: {{ .pathType }}
+          # Path regex: capture suffix so /api/v1/predict/5/health -> /health, /api/v1/predict/5 -> /
+          - path: {{ .path }}(/|$)(.*)
+            pathType: ImplementationSpecific
             backend:
               service:
                 name: {{ include "model-serving.fullname" $ }}
@@ -41,4 +45,5 @@ spec:
           {{- end }}
     {{- end }}
 {{- end }}
+
 

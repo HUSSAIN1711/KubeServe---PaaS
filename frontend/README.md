@@ -138,3 +138,4 @@ The frontend communicates with the KubeServe API at `/api/v1`:
 - [ ] Add toast notifications
 - [ ] Add dark mode support
 
+

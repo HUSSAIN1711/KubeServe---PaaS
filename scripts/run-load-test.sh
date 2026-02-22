@@ -69,3 +69,4 @@ echo "   kubectl get hpa -n user-1"
 echo "   kubectl get pods -n user-1 -w"
 echo ""
 
+

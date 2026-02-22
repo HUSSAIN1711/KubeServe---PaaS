@@ -46,3 +46,4 @@ echo ""
 echo "To start everything again, run:"
 echo "  ./scripts/start-backend.sh"
 
+

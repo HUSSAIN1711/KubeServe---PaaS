@@ -279,3 +279,4 @@ class TestDashboardConfiguration:
                     assert isinstance(intervals, list)
                     assert len(intervals) > 0
 
+

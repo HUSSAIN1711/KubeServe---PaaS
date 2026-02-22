@@ -19,19 +19,30 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # Create modeltype enum
-    op.execute("CREATE TYPE modeltype AS ENUM ('sklearn', 'pytorch')")
+    # Create enum types using DO block to handle "already exists" gracefully
+    # PostgreSQL doesn't support IF NOT EXISTS for CREATE TYPE, so we use a DO block
+    op.execute("""
+        DO $$ BEGIN
+            CREATE TYPE modeltype AS ENUM ('sklearn', 'pytorch');
+        EXCEPTION WHEN duplicate_object THEN null;
+        END $$;
+    """)
     
-    # Create modelversionsstatus enum
-    op.execute("CREATE TYPE modelversionsstatus AS ENUM ('Building', 'Ready', 'Failed')")
+    op.execute("""
+        DO $$ BEGIN
+            CREATE TYPE modelversionsstatus AS ENUM ('Building', 'Ready', 'Failed');
+        EXCEPTION WHEN duplicate_object THEN null;
+        END $$;
+    """)
     
     # Create models table
+    # Note: create_type=False prevents SQLAlchemy from auto-creating the enum
     op.create_table(
         'models',
         sa.Column('id', sa.Integer(), nullable=False),
         sa.Column('user_id', sa.Integer(), nullable=False),
         sa.Column('name', sa.String(), nullable=False),
-        sa.Column('type', sa.Enum('SKLEARN', 'PYTORCH', name='modeltype'), nullable=False),
+        sa.Column('type', postgresql.ENUM('sklearn', 'pytorch', name='modeltype', create_type=False), nullable=False),
         sa.Column('created_at', sa.DateTime(), nullable=False),
         sa.Column('updated_at', sa.DateTime(), nullable=False),
         sa.ForeignKeyConstraint(['user_id'], ['users.id'], ondelete='CASCADE'),
@@ -41,13 +52,14 @@ def upgrade() -> None:
     op.create_index(op.f('ix_models_user_id'), 'models', ['user_id'], unique=False)
     
     # Create model_versions table
+    # Note: create_type=False prevents SQLAlchemy from auto-creating the enum
     op.create_table(
         'model_versions',
         sa.Column('id', sa.Integer(), nullable=False),
         sa.Column('model_id', sa.Integer(), nullable=False),
         sa.Column('version_tag', sa.String(), nullable=False),
         sa.Column('s3_path', sa.String(), nullable=False),
-        sa.Column('status', sa.Enum('BUILDING', 'READY', 'FAILED', name='modelversionsstatus'), nullable=False),
+        sa.Column('status', postgresql.ENUM('Building', 'Ready', 'Failed', name='modelversionsstatus', create_type=False), nullable=False),
         sa.Column('created_at', sa.DateTime(), nullable=False),
         sa.Column('updated_at', sa.DateTime(), nullable=False),
         sa.ForeignKeyConstraint(['model_id'], ['models.id'], ondelete='CASCADE'),
@@ -90,4 +102,5 @@ def downgrade() -> None:
     # Drop enums
     sa.Enum(name='modelversionsstatus').drop(op.get_bind(), checkfirst=True)
     sa.Enum(name='modeltype').drop(op.get_bind(), checkfirst=True)
+
 

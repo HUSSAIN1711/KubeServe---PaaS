@@ -14,7 +14,7 @@ NC='\033[0m' # No Color
 
 # Configuration
 API_BASE_URL="${API_BASE_URL:-http://localhost:8000}"
-TEST_USER_EMAIL="${TEST_USER_EMAIL:-integration-test@kubeserve.local}"
+TEST_USER_EMAIL="${TEST_USER_EMAIL:-integration-test@example.com}"
 TEST_USER_PASSWORD="${TEST_USER_PASSWORD:-testpass123}"
 MODEL_NAME="${MODEL_NAME:-integration-test-model}"
 VERSION_TAG="${VERSION_TAG:-v1.0.0}"
@@ -24,6 +24,15 @@ echo "========================================"
 echo "API Base URL: $API_BASE_URL"
 echo "Test User: $TEST_USER_EMAIL"
 echo ""
+
+# Pre-flight: MinIO must be reachable at localhost:9000 for uploads. If you use in-cluster MinIO,
+# run: kubectl port-forward svc/minio 9000:9000 -n default &
+# so uploads and deploy use the same MinIO.
+if ! curl -sf --connect-timeout 2 "http://localhost:9000/minio/health/live" >/dev/null 2>&1; then
+    echo -e "${YELLOW}⚠️  MinIO not reachable at localhost:9000. Uploads will fail.${NC}"
+    echo "   If using in-cluster MinIO: kubectl port-forward svc/minio 9000:9000 -n default &"
+    echo ""
+fi
 
 # Step 1: Register user
 echo "📝 Step 1: Registering test user..."
@@ -131,9 +140,16 @@ if [ ! -f /tmp/test_model.joblib ]; then
     exit 1
 fi
 
+# Minimal requirements for the test model (joblib + scikit-learn)
+cat > /tmp/test_requirements.txt << 'REQEOF'
+joblib>=1.3.0
+scikit-learn>=1.3.0
+REQEOF
+
 UPLOAD_RESPONSE=$(curl -s -X POST "$API_BASE_URL/api/v1/versions/$VERSION_ID/upload" \
     -H "$AUTH_HEADER" \
-    -F "file=@/tmp/test_model.joblib")
+    -F "model_file=@/tmp/test_model.joblib" \
+    -F "requirements_file=@/tmp/test_requirements.txt")
 
 if echo "$UPLOAD_RESPONSE" | grep -q "s3_path"; then
     echo -e "${GREEN}✅ Model file uploaded successfully${NC}"
@@ -179,12 +195,12 @@ echo "   Deployment URL: $DEPLOYMENT_URL"
 
 # Wait for deployment to be ready
 echo ""
-echo "⏳ Waiting for deployment to be ready (max 5 minutes)..."
-MAX_WAIT=300
+echo "⏳ Waiting for deployment to be ready (up to 90 seconds)..."
+MAX_WAIT=90
 WAITED=0
 while [ $WAITED -lt $MAX_WAIT ]; do
-    sleep 10
-    WAITED=$((WAITED + 10))
+    sleep 5
+    WAITED=$((WAITED + 5))
     
     # Check deployment health
     if [ -n "$DEPLOYMENT_URL" ]; then
@@ -202,22 +218,40 @@ if [ $WAITED -ge $MAX_WAIT ]; then
     echo -e "${YELLOW}⚠️  Deployment might not be ready yet, continuing anyway...${NC}"
 fi
 
-# Step 8: Make predictions
+# Step 8: Make predictions (retry a few times in case pod just became ready)
 echo ""
 echo "🔮 Step 8: Making predictions..."
 if [ -n "$DEPLOYMENT_URL" ]; then
-    PREDICT_RESPONSE=$(curl -s -X POST "$DEPLOYMENT_URL/predict" \
-        -H "Content-Type: application/json" \
-        -d '{
-            "data": [[1.0, 2.0], [2.0, 3.0]]
-        }')
-    
-    if echo "$PREDICT_RESPONSE" | grep -q "predictions"; then
-        echo -e "${GREEN}✅ Predictions successful!${NC}"
-        echo "   Response: $PREDICT_RESPONSE"
-    else
+    PREDICT_OK=false
+    for attempt in 1 2 3; do
+        PREDICT_RESPONSE=$(curl -s -X POST "$DEPLOYMENT_URL/predict" \
+            -H "Content-Type: application/json" \
+            -d '{
+                "data": [[1.0, 2.0], [2.0, 3.0]]
+            }')
+        if echo "$PREDICT_RESPONSE" | grep -q "predictions"; then
+            echo -e "${GREEN}✅ Predictions successful!${NC}"
+            echo "   Response: $PREDICT_RESPONSE"
+            PREDICT_OK=true
+            break
+        fi
+        if [ $attempt -lt 3 ]; then
+            echo "   Attempt $attempt failed, retrying in 15s..."
+            sleep 15
+        fi
+    done
+    if [ "$PREDICT_OK" = false ]; then
         echo -e "${RED}❌ Failed to make predictions${NC}"
         echo "   Response: $PREDICT_RESPONSE"
+        if echo "$PREDICT_RESPONSE" | grep -q "503\|Service Temporarily Unavailable"; then
+            echo ""
+            echo -e "${YELLOW}💡 503 = no ready inference pod. Run these (during the test or right after Step 7):${NC}"
+            echo "   kubectl get namespaces | grep user-"
+            echo "   kubectl get pods -A"
+            echo "   kubectl logs <pod> -n user-X -c download-model   # why model download failed"
+            echo "   If using in-cluster MinIO: kubectl port-forward svc/minio 9000:9000 -n default &"
+            echo "   Restart backend; port-forward Ingress: 30080:80"
+        fi
         exit 1
     fi
 else
@@ -255,10 +289,11 @@ else
 fi
 
 # Cleanup temp file
-rm -f /tmp/test_model.joblib
+rm -f /tmp/test_model.joblib /tmp/test_requirements.txt
 
 echo ""
 echo "========================================"
 echo -e "${GREEN}✅ Integration test completed successfully!${NC}"
 echo ""
+
 

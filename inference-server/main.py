@@ -109,10 +109,14 @@ async def startup_event():
 async def health_check():
     """
     Health check endpoint.
-    
-    Returns:
-        dict: Health status
+    Returns 503 until the model is loaded so readiness probes and callers
+    only consider the pod ready when predictions can be served.
     """
+    if not model_loaded:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Model not loaded yet",
+        )
     return {
         "status": "healthy",
         "model_loaded": model_loaded

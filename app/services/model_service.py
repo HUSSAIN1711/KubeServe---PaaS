@@ -383,11 +383,26 @@ class DeploymentService:
             # Full S3 path for Helm
             full_s3_path = f"s3://{s3_bucket}/{s3_key}" if s3_key else f"s3://{s3_bucket}/"
             
-            # Determine S3 endpoint (use internal service name for Kubernetes)
-            # For local dev, use minio:9000 (internal to cluster)
-            # For external, use settings.MINIO_ENDPOINT
-            s3_endpoint = "minio:9000"  # Internal cluster endpoint
-            
+            # S3 endpoint for pods. Use MINIO_DEPLOY_ENDPOINT when set (e.g. in-cluster MinIO).
+            # Otherwise when MinIO is on host (localhost), use cluster DNS name (apply scripts/kind-minio-host.yaml).
+            if settings.MINIO_DEPLOY_ENDPOINT:
+                s3_endpoint = settings.MINIO_DEPLOY_ENDPOINT
+            else:
+                minio_host, _, minio_port = (settings.MINIO_ENDPOINT or "localhost:9000").partition(":")
+                minio_port = minio_port or "9000"
+                if minio_host in ("localhost", "127.0.0.1"):
+                    s3_endpoint = f"minio-host.default.svc.cluster.local:{minio_port}"
+                else:
+                    s3_endpoint = f"{minio_host}:{minio_port}"
+            # #region agent log
+            try:
+                import json
+                _log = open("/Users/hmahuvaw/Coding/KubeServe/.cursor/debug.log", "a")
+                _log.write(json.dumps({"id": "deploy_params", "timestamp": __import__("time").time() * 1000, "location": "model_service.py:deploy", "message": "deploy params", "data": {"version_id": version.id, "version_s3_path": version.s3_path, "full_s3_path": full_s3_path, "s3_endpoint": s3_endpoint}, "hypothesisId": "H2"}) + "\n")
+                _log.close()
+            except Exception:
+                pass
+            # #endregion
             # Deploy using Helm with deployment_id in the ingress path
             deployment_info = self.helm_service.deploy_model(
                 release_name=release_name,

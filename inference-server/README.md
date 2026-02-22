@@ -30,10 +30,95 @@ cd inference-server
 docker build -t kubeserve-base:latest .
 ```
 
-Or tag for local registry:
+Or use the build script (from `inference-server/`):
 ```bash
-docker build -t localhost:5001/kubeserve-base:latest .
-docker push localhost:5001/kubeserve-base:latest
+./build.sh [tag] [registry]
+# Examples:
+./build.sh                    # builds kubeserve-base:latest, tags for localhost:5001
+./build.sh v1.2.3             # builds kubeserve-base:v1.2.3
+./build.sh latest myreg.io   # tags for myreg.io/kubeserve-base:latest
+```
+
+Then push to your registry (script prints the exact command):
+```bash
+docker push localhost:5001/kubeserve-base:latest   # local registry
+# or
+docker push <your-registry>/kubeserve-base:latest  # remote registry
+```
+
+---
+
+## Rebuild and redeploy (use new image in Kubernetes)
+
+After you rebuild the inference image, do the following so running deployments use it.
+
+### 1. Build and push the image
+
+From the **repo root**:
+
+```bash
+# Build (option A: direct docker)
+docker build -t <your-registry>/kubeserve-base:latest inference-server/
+
+# Build (option B: use script from inference-server dir)
+cd inference-server && ./build.sh latest <your-registry> && cd ..
+
+# Push to the registry your chart uses
+docker push <your-registry>/kubeserve-base:latest
+```
+
+Use the same registry and tag as in your Helm values (default in chart: `localhost:5001/kubeserve-base:latest` for a local registry).
+
+### 2. Restart deployments so pods use the new image
+
+**Option A – Restart a specific deployment (by Helm release name)**
+
+If your release is in namespace `user-1` and the release name is e.g. `model-42-1739123456`:
+
+```bash
+# Restart the deployment (new pods will be created)
+kubectl rollout restart deployment/model-42-1739123456-model-serving -n user-1
+```
+
+To find release names: list Helm releases, or use the name shown in the KubeServe UI (e.g. "Service name" / `k8s_service_name`). The deployment name is `{release-name}-model-serving`.
+
+**Option B – Scale to 0 then back up**
+
+```bash
+kubectl scale deployment/<release-name>-model-serving -n <namespace> --replicas=0
+kubectl scale deployment/<release-name>-model-serving -n <namespace> --replicas=1
+```
+
+**Option C – Helm upgrade with same chart (e.g. after changing image tag)**
+
+If you use a **new image tag** (recommended so Kubernetes pulls the new image):
+
+```bash
+# Upgrade with new image tag (replace release name, namespace, and tag)
+helm upgrade <release-name> charts/model-serving -n <namespace> \
+  --set deployment.image.repository=<your-registry>/kubeserve-base \
+  --set deployment.image.tag=v1.2.3 \
+  --reuse-values
+```
+
+**Using tag `latest`:** If you keep using `latest`, set pull policy to Always so each new pod pulls the updated image:
+
+```bash
+helm upgrade <release-name> charts/model-serving -n <namespace> \
+  --set deployment.image.pullPolicy=Always \
+  --reuse-values
+```
+
+Then delete the pods so they are recreated and pull the new image:
+
+```bash
+kubectl delete pods -l app.kubernetes.io/instance=<release-name> -n <namespace>
+```
+
+**Restart all model-serving deployments in a namespace:**
+
+```bash
+kubectl rollout restart deployment -l app.kubernetes.io/component=inference-server -n <namespace>
 ```
 
 ## How It Works
@@ -109,4 +194,5 @@ This inference server will be deployed to Kubernetes in Phase 3, where:
 - Deployments use this base image
 - Services expose the inference endpoints
 - HPA scales based on load
+
 

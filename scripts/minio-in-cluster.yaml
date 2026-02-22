@@ -1,0 +1,109 @@
+# MinIO running inside the cluster. Use with Kind so model pods can reach S3 without host networking.
+# 1. Apply: kubectl apply -f scripts/minio-in-cluster.yaml
+# 2. Port-forward so the backend can upload: kubectl port-forward svc/minio 9000:9000 -n default &
+# 3. Set in .env: MINIO_ENDPOINT=localhost:9000 and MINIO_DEPLOY_ENDPOINT=minio.default.svc.cluster.local:9000
+# 4. Start backend; run integration test. Backend uploads via localhost:9000, pods download via in-cluster Service.
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio
+  namespace: default
+  labels:
+    app: minio
+spec:
+  type: ClusterIP
+  ports:
+    - name: api
+      port: 9000
+      targetPort: 9000
+      protocol: TCP
+    - name: console
+      port: 9001
+      targetPort: 9001
+      protocol: TCP
+  selector:
+    app: minio
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minio
+  namespace: default
+  labels:
+    app: minio
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: minio
+  template:
+    metadata:
+      labels:
+        app: minio
+    spec:
+      containers:
+        - name: minio
+          image: minio/minio:latest
+          args:
+            - server
+            - /data
+            - --console-address
+            - ":9001"
+          env:
+            - name: MINIO_ROOT_USER
+              value: minioadmin
+            - name: MINIO_ROOT_PASSWORD
+              value: minioadmin
+          ports:
+            - containerPort: 9000
+              name: api
+            - containerPort: 9001
+              name: console
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+# One-off job to create the bucket so it exists before first upload (backend also creates on upload).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: minio-create-bucket
+  namespace: default
+  labels:
+    app: minio
+spec:
+  ttlSecondsAfterFinished: 300
+  backoffLimit: 10
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: create-bucket
+          image: minio/mc:latest
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              for i in 1 2 3 4 5 6 7 8 9 10; do
+                if mc alias set s3 http://minio.default.svc.cluster.local:9000 minioadmin minioadmin 2>/dev/null; then
+                  mc mb s3/kubeserve-models --ignore-existing 2>/dev/null || true
+                  echo "Bucket kubeserve-models ready"
+                  exit 0
+                fi
+                echo "Waiting for MinIO... ($i/10)"
+                sleep 5
+              done
+              echo "MinIO not reachable"
+              exit 1

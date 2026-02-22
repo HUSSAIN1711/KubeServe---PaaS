@@ -41,3 +41,4 @@ def downgrade() -> None:
     # Drop the enum type
     sa.Enum(name='userrole').drop(op.get_bind(), checkfirst=True)
 
+

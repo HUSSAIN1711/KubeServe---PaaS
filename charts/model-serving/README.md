@@ -166,3 +166,4 @@ kubectl exec -it deployment/{release-name}-model-serving -c inference-server -- 
 helm uninstall my-model --namespace user-1
 ```
 
+

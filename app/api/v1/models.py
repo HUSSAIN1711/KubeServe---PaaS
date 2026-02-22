@@ -3,8 +3,9 @@ Model registry API routes.
 Handles model, model version, and deployment operations.
 """
 
+import logging
 from typing import List
-from fastapi import APIRouter, Depends, status, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -26,6 +27,7 @@ from app.core.dependencies import get_current_active_user
 from app.schemas.user import UserResponse
 from app.models.model import ModelVersionStatus
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -47,8 +49,14 @@ async def create_model(
     Returns:
         Created model response
     """
-    service = ModelService(db)
-    return await service.create_model(model_data, current_user.id)
+    try:
+        service = ModelService(db)
+        return await service.create_model(model_data, current_user.id)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Create model failed: %s", e)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
 @router.get("/models", response_model=List[ModelResponse])
@@ -136,8 +144,14 @@ async def create_model_version(
     # Ensure model_id in path matches version_data
     version_data.model_id = model_id
 
-    service = ModelVersionService(db)
-    return await service.create_version(version_data, current_user.id)
+    try:
+        service = ModelVersionService(db)
+        return await service.create_version(version_data, current_user.id)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Create model version failed: %s", e)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
 @router.get(
@@ -255,7 +269,15 @@ async def upload_model_artifacts(
     updated_version = await version_service.update_version_s3_path(
         version_id, model_s3_path, current_user.id
     )
-    
+    # #region agent log
+    try:
+        import json
+        _log = open("/Users/hmahuvaw/Coding/KubeServe/.cursor/debug.log", "a")
+        _log.write(json.dumps({"id": "upload_s3_path", "timestamp": __import__("time").time() * 1000, "location": "models.py:upload", "message": "upload stored s3 path", "data": {"version_id": version_id, "model_s3_path": model_s3_path}, "hypothesisId": "H2"}) + "\n")
+        _log.close()
+    except Exception:
+        pass
+    # #endregion
     return updated_version
 
 

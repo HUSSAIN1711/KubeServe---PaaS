@@ -37,6 +37,12 @@ kind get clusters
 
 # If cluster doesn't exist, create it
 ./scripts/setup-kind-cluster.sh
+
+# Kind: choose one so model pods can reach MinIO:
+#   A) MinIO on host (docker-compose): kubectl apply -f scripts/kind-minio-host.yaml
+#   B) MinIO in cluster (recommended): kubectl apply -f scripts/minio-in-cluster.yaml
+#      Then: kubectl port-forward svc/minio 9000:9000 -n default &
+#      In .env set: MINIO_ENDPOINT=localhost:9000 and MINIO_DEPLOY_ENDPOINT=minio.default.svc.cluster.local:9000
 ```
 
 ### 2. Build and Push Inference Server Image
@@ -142,7 +148,7 @@ You should see output like:
 🧪 Starting KubeServe Integration Test
 ========================================
 API Base URL: http://localhost:8000
-Test User: integration-test@kubeserve.local
+Test User: integration-test@example.com
 
 📝 Step 1: Registering test user...
 ✅ User registered successfully
@@ -265,12 +271,23 @@ python3 -c "import joblib; from sklearn.linear_model import LogisticRegression; 
 
 ### Deployment Timeout
 
-**Error**: Deployment doesn't become ready within 5 minutes
+**Error**: Deployment doesn't become ready within 90 seconds (health never returns 200)
 
 **Solution**:
 ```bash
-# Check pod status
+# Kind: use in-cluster MinIO (recommended) so pods can reach S3:
+#   kubectl apply -f scripts/minio-in-cluster.yaml
+#   kubectl port-forward svc/minio 9000:9000 -n default &
+#   In .env: MINIO_ENDPOINT=localhost:9000 and MINIO_DEPLOY_ENDPOINT=minio.default.svc.cluster.local:9000
+#   Restart the backend, then run the test again.
+
+# Or if using MinIO on host: kubectl apply -f scripts/kind-minio-host.yaml
+
+# Check pod status (replace user-1 with your user namespace, e.g. user-2)
 kubectl get pods -n user-1
+
+# If pod is in Init or CrashLoop, check the model-download init container
+kubectl logs -n user-1 <pod-name> -c download-model
 
 # Check pod events
 kubectl describe pod -n user-1 <pod-name>
@@ -363,4 +380,5 @@ If the test fails:
    - Pod logs: `kubectl logs -n user-1 <pod-name>`
    - Docker logs: `docker-compose logs`
 4. Verify all prerequisites are met
+
 

@@ -109,20 +109,36 @@ if [ $RETRY -eq $MAX_RETRIES ]; then
     echo -e "${YELLOW}⚠️  Minio health check timed out, but continuing...${NC}"
 fi
 
-# Check PostgreSQL health
+# Check PostgreSQL health - use kubeserve user (matches docker-compose.yml)
 echo "Checking PostgreSQL health..."
 RETRY=0
+POSTGRES_READY=false
 while [ $RETRY -lt $MAX_RETRIES ]; do
-    if docker exec kubeserve-postgres pg_isready -U postgres > /dev/null 2>&1; then
-        echo -e "${GREEN}✅ PostgreSQL is ready${NC}"
+    # Try connecting as kubeserve user (created by POSTGRES_USER env var)
+    if docker exec kubeserve-postgres pg_isready -U kubeserve > /dev/null 2>&1; then
+        echo -e "${GREEN}✅ PostgreSQL is ready (user: kubeserve)${NC}"
+        POSTGRES_READY=true
         break
     fi
     RETRY=$((RETRY + 1))
     sleep 2
 done
 
-if [ $RETRY -eq $MAX_RETRIES ]; then
-    echo -e "${YELLOW}⚠️  PostgreSQL health check timed out, but continuing...${NC}"
+if [ "$POSTGRES_READY" = false ]; then
+    echo -e "${YELLOW}⚠️  PostgreSQL health check timed out${NC}"
+    echo "Checking if PostgreSQL container is running..."
+    if ! docker ps | grep -q kubeserve-postgres; then
+        echo -e "${RED}❌ PostgreSQL container is not running${NC}"
+        echo "Starting PostgreSQL..."
+        docker-compose up -d postgres
+        echo "Waiting 15 seconds for PostgreSQL to initialize..."
+        sleep 15
+    else
+        echo "PostgreSQL container is running but not ready yet"
+        echo "This may take 15-30 seconds on first run"
+        echo "You can check logs with: docker logs kubeserve-postgres"
+    fi
+    echo -e "${YELLOW}   Database migrations may fail if PostgreSQL isn't ready${NC}"
 fi
 
 echo ""
@@ -290,18 +306,45 @@ echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━�
 
 cd "$PROJECT_ROOT"
 
-# Check if .env exists
+# Check if .env exists and has correct database credentials
+ENV_NEEDS_UPDATE=false
+CORRECT_DB_URL="postgresql+asyncpg://kubeserve:kubeserve_dev@localhost:5433/kubeserve"
+
 if [ ! -f .env ]; then
     echo "Creating .env file..."
+    ENV_NEEDS_UPDATE=true
+elif ! grep -q "^DATABASE_URL=" .env 2>/dev/null; then
+    echo -e "${YELLOW}⚠️  DATABASE_URL not found in .env file${NC}"
+    ENV_NEEDS_UPDATE=true
+else
+    # Check if DATABASE_URL has correct credentials
+    CURRENT_DB_URL=$(grep "^DATABASE_URL=" .env | head -1 | cut -d'=' -f2-)
+    if [[ "$CURRENT_DB_URL" != "$CORRECT_DB_URL" ]]; then
+        echo -e "${YELLOW}⚠️  DATABASE_URL has incorrect credentials${NC}"
+        echo "   Current: $CURRENT_DB_URL"
+        echo "   Expected: $CORRECT_DB_URL"
+        ENV_NEEDS_UPDATE=true
+    fi
+fi
+
+if [ "$ENV_NEEDS_UPDATE" = true ]; then
     if [ -f .env.example ]; then
         cp .env.example .env
-        echo -e "${GREEN}✅ Created .env from .env.example${NC}"
+        # Ensure correct database URL even if .env.example has wrong one
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+            sed -i '' "s|^DATABASE_URL=.*|DATABASE_URL=$CORRECT_DB_URL|" .env 2>/dev/null
+            sed -i '' 's|postgresql+asyncpg://postgres:postgres@|postgresql+asyncpg://kubeserve:kubeserve_dev@|' .env 2>/dev/null
+        else
+            sed -i "s|^DATABASE_URL=.*|DATABASE_URL=$CORRECT_DB_URL|" .env 2>/dev/null
+            sed -i 's|postgresql+asyncpg://postgres:postgres@|postgresql+asyncpg://kubeserve:kubeserve_dev@|' .env 2>/dev/null
+        fi
+        echo -e "${GREEN}✅ Created/updated .env from .env.example${NC}"
     else
         # Create minimal .env with defaults
         cat > .env << EOF
 # Database
 # Note: User/password match docker-compose.yml postgres service
-DATABASE_URL=postgresql+asyncpg://kubeserve:kubeserve_dev@localhost:5432/kubeserve
+DATABASE_URL=$CORRECT_DB_URL
 
 # Minio/S3
 MINIO_ENDPOINT=localhost:9000
@@ -326,6 +369,24 @@ EOF
         echo -e "${GREEN}✅ Created .env with default values${NC}"
     fi
     echo -e "${YELLOW}⚠️  Using default .env values. Edit .env if needed.${NC}"
+else
+    echo -e "${GREEN}✅ Using existing .env file with correct credentials${NC}"
+fi
+
+# Verify DATABASE_URL one more time before migrations
+if grep -q "^DATABASE_URL=" .env; then
+    FINAL_DB_URL=$(grep "^DATABASE_URL=" .env | head -1 | cut -d'=' -f2-)
+    if [[ "$FINAL_DB_URL" == "$CORRECT_DB_URL" ]]; then
+        echo -e "${GREEN}✅ DATABASE_URL verified: $FINAL_DB_URL${NC}"
+    else
+        echo -e "${RED}❌ DATABASE_URL still incorrect: $FINAL_DB_URL${NC}"
+        echo -e "${YELLOW}   Run: ./scripts/verify-env.sh to fix it${NC}"
+        exit 1
+    fi
+else
+    echo -e "${RED}❌ DATABASE_URL not found in .env${NC}"
+    echo -e "${YELLOW}   Run: ./scripts/verify-env.sh to fix it${NC}"
+    exit 1
 fi
 
 # Check if virtual environment exists
@@ -338,6 +399,82 @@ fi
 echo "Installing Python dependencies..."
 "$VENV_PYTHON" -m pip install -q --upgrade pip
 "$VENV_PYTHON" -m pip install -q -r requirements.txt
+
+# Load DATABASE_URL from .env file for database connection test
+# Use the FINAL_DB_URL we already extracted and verified above (line 378)
+if [ -n "$FINAL_DB_URL" ]; then
+    export DATABASE_URL="$FINAL_DB_URL"
+else
+    # Fallback: extract from .env file using awk to handle values with = in them
+    if [ -f .env ]; then
+        DATABASE_URL=$(grep "^DATABASE_URL=" .env | head -1 | awk -F'=' '{for(i=2;i<=NF;i++){if(i>2)printf "="; printf "%s", $i}}')
+        export DATABASE_URL
+    fi
+fi
+
+# Test database connection before running migrations
+echo "Testing database connection..."
+if "$VENV_PYTHON" -c "
+import asyncio
+import asyncpg
+import os
+from urllib.parse import urlparse
+
+# Parse DATABASE_URL
+db_url = os.getenv('DATABASE_URL', '')
+if not db_url:
+    print('❌ DATABASE_URL not set')
+    exit(1)
+
+# Parse connection string
+parsed = urlparse(db_url.replace('postgresql+asyncpg://', 'postgresql://'))
+user = parsed.username
+password = parsed.password
+host = parsed.hostname
+port = parsed.port or 5433
+database = parsed.path.lstrip('/')
+
+async def test_connection():
+    try:
+        conn = await asyncpg.connect(
+            host=host,
+            port=port,
+            user=user,
+            password=password,
+            database=database
+        )
+        result = await conn.fetchval('SELECT 1')
+        await conn.close()
+        print(f'✅ Database connection successful (user: {user}, database: {database})')
+        return True
+    except asyncpg.exceptions.InvalidAuthorizationSpecificationError as e:
+        print(f'❌ Authentication failed: {e}')
+        print(f'   User: {user}, Database: {database}')
+        print('   Run: ./scripts/reset-postgres.sh')
+        return False
+    except asyncpg.exceptions.InvalidCatalogNameError as e:
+        print(f'❌ Database does not exist: {e}')
+        print(f'   Database: {database}')
+        print('   Run: ./scripts/reset-postgres.sh')
+        return False
+    except Exception as e:
+        print(f'❌ Connection failed: {e}')
+        return False
+
+result = asyncio.run(test_connection())
+exit(0 if result else 1)
+" 2>&1; then
+    echo -e "${GREEN}✅ Database connection verified${NC}"
+else
+    echo -e "${RED}❌ Database connection test failed${NC}"
+    echo -e "${YELLOW}   Please check:${NC}"
+    echo "   1. PostgreSQL container is running: docker ps | grep postgres"
+    echo "   2. User 'kubeserve' exists: docker exec kubeserve-postgres psql -U postgres -c '\du'"
+    echo "   3. Database 'kubeserve' exists: docker exec kubeserve-postgres psql -U postgres -l"
+    echo ""
+    echo -e "${YELLOW}   To fix, run: ./scripts/reset-postgres.sh${NC}"
+    exit 1
+fi
 
 echo "Running database migrations..."
 "$VENV_PYTHON" -m alembic upgrade head
@@ -365,6 +502,10 @@ echo -e "${GREEN}🚀 Starting FastAPI Server...${NC}"
 echo ""
 echo "The API server will start on http://localhost:8000"
 echo "API docs available at http://localhost:8000/docs"
+echo ""
+echo -e "${YELLOW}Grafana / Prometheus (Kind):${NC} To view dashboards, run in a separate terminal:"
+echo "  kubectl port-forward -n monitoring svc/kube-prometheus-stack-grafana 30091:80"
+echo "  Then open http://localhost:30091 (login: admin / admin)"
 echo ""
 echo -e "${YELLOW}Press Ctrl+C to stop the server${NC}"
 echo ""

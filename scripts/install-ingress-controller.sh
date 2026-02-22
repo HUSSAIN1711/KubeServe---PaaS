@@ -76,3 +76,4 @@ echo "💡 For local development with Kind, you may need to:"
 echo "   kubectl port-forward -n ingress-nginx svc/ingress-nginx-controller 30080:80 30443:443"
 echo ""
 
+

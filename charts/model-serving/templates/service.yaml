@@ -16,3 +16,4 @@ spec:
   selector:
     {{- include "model-serving.selectorLabels" . | nindent 4 }}
 
+

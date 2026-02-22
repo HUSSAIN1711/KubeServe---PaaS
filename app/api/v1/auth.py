@@ -75,3 +75,4 @@ async def login(
     access_token = service.create_access_token_for_user(user)
     return Token(access_token=access_token)
 
+

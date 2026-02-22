@@ -368,3 +368,4 @@ The frontend is now functional with:
 
 Additional features can be added incrementally based on user needs.
 
+

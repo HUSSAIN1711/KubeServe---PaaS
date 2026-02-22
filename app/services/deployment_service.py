@@ -131,10 +131,9 @@ class HelmDeploymentService:
             "--set", f"ingress.enabled={str(ingress_enabled).lower()}",
             "--set", f"ingress.hosts[0].host={ingress_host}",
             "--set", f"ingress.hosts[0].paths[0].path={ingress_path}",
-            "--set", f"ingress.hosts[0].paths[0].pathType=Prefix",
+            # Do not set pathType: chart uses ImplementationSpecific for regex path matching
             "--set", "monitoring.serviceMonitor.enabled=true",
         ]
-
         logger.info(f"Deploying model with Helm: {' '.join(helm_command)}")
 
         # Run Helm install

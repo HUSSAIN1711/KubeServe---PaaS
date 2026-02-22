@@ -1,0 +1,15 @@
+# Optional: apply this when running integration tests with Kind so pods can reach
+# MinIO on the host (e.g. docker-compose). Creates a Service that resolves to
+# host.docker.internal so init containers can run "mc cp" from MinIO.
+# Usage: kubectl apply -f scripts/kind-minio-host.yaml
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio-host
+  namespace: default
+  labels:
+    app: minio-host
+spec:
+  type: ExternalName
+  externalName: host.docker.internal

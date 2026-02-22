@@ -294,3 +294,4 @@ As we build features, we'll follow this pattern consistently:
 - Phase 1.3: Model Registry (Model, ModelVersion models)
 - Phase 1.4: Artifact Storage (Minio service)
 
+

@@ -93,3 +93,4 @@ echo ""
 echo "📊 ServiceMonitors will automatically discover services with the correct labels."
 echo ""
 
+

@@ -230,3 +230,4 @@ All scripts follow these principles:
 - **Progress indicators**: Shows what's happening
 - **Graceful degradation**: Continues if optional steps fail
 
+

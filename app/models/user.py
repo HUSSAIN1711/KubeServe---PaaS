@@ -31,3 +31,4 @@ class User(Base):
     # Relationships
     models = relationship("Model", back_populates="user", cascade="all, delete-orphan")
 
+

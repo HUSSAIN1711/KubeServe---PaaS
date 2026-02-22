@@ -126,3 +126,4 @@ def on_test_stop(environment, **kwargs):
     print(f"Max Response Time: {stats.total.max_response_time:.2f}ms")
     print("="*60 + "\n")
 
+

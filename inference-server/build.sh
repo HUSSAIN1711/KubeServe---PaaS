@@ -29,3 +29,4 @@ echo ""
 echo "To test locally:"
 echo "  docker run -p 8080:80 ${IMAGE_NAME}:${IMAGE_TAG}"
 
+

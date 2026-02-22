@@ -22,3 +22,4 @@ spec:
     scrapeTimeout: {{ .Values.monitoring.serviceMonitor.scrapeTimeout | default "10s" }}
 {{- end }}
 
+

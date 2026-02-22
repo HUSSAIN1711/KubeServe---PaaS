@@ -31,7 +31,15 @@ class Model(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     name = Column(String, nullable=False)
-    type = Column(Enum(ModelType), nullable=False)
+    type = Column(
+        Enum(
+            ModelType,
+            name="modeltype",
+            create_type=False,
+            values_callable=lambda obj: [e.value for e in obj],
+        ),
+        nullable=False,
+    )
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
@@ -49,7 +57,16 @@ class ModelVersion(Base):
     model_id = Column(Integer, ForeignKey("models.id", ondelete="CASCADE"), nullable=False, index=True)
     version_tag = Column(String, nullable=False)  # e.g., "v1", "v2", "latest"
     s3_path = Column(String, nullable=False)  # Path to model artifact in S3
-    status = Column(Enum(ModelVersionStatus), default=ModelVersionStatus.BUILDING, nullable=False)
+    status = Column(
+        Enum(
+            ModelVersionStatus,
+            name="modelversionsstatus",
+            create_type=False,
+            values_callable=lambda obj: [e.value for e in obj],
+        ),
+        default=ModelVersionStatus.BUILDING,
+        nullable=False,
+    )
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 

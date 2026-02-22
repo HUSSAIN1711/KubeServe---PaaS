@@ -32,6 +32,8 @@ class Settings(BaseSettings):
     MINIO_SECRET_KEY: str
     MINIO_BUCKET_NAME: str = "kubeserve-models"
     MINIO_USE_SSL: bool = False
+    # When set, used as S3 endpoint for deploy (e.g. minio.default.svc.cluster.local:9000 for in-cluster MinIO)
+    MINIO_DEPLOY_ENDPOINT: Optional[str] = None
 
     # JWT Authentication
     JWT_SECRET_KEY: str
